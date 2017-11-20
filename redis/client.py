@@ -9,7 +9,7 @@ import time as mod_time
 import hashlib
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, unicode,
-                           safe_unicode)
+                           safe_unicode, Sequence, Mapping)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection, Token)
 from redis.lock import Lock, LuaLock
@@ -345,6 +345,17 @@ def parse_pubsub_numsub(response, **options):
     return list(zip(response[0::2], response[1::2]))
 
 
+def parse_xread(response, **options):
+    # dict of streams, list of tuples of entry id and dict of key-val
+    if not response:
+        return {}
+    return {
+        nativestr(stream):
+            [(nativestr(entry[0]), pairs_to_dict(entry[1])) for entry in data]
+        for stream, data in response
+    }
+
+
 class StrictRedis(object):
     """
     Implementation of the Redis protocol.
@@ -455,6 +466,8 @@ class StrictRedis(object):
             'GEORADIUS': parse_georadius_generic,
             'GEORADIUSBYMEMBER': parse_georadius_generic,
             'PUBSUB NUMSUB': parse_pubsub_numsub,
+            'XADD': nativestr,
+            'XREAD': parse_xread
         }
     )
 
@@ -2237,6 +2250,53 @@ class StrictRedis(object):
             pieces.extend([Token('STOREDIST'), kwargs['store_dist']])
 
         return self.execute_command(command, *pieces, **kwargs)
+
+    def xadd(self, name, fields, id_='*', maxlen=None):
+        pieces = [name]
+        if maxlen is not None:
+            pieces.extend([Token('MAXLEN'), maxlen])
+        pieces.append(id_)
+
+        if not isinstance(fields, Mapping):
+            raise RedisError("XADD fields must be mapping")
+
+        for field_value in fields.items():
+            pieces.extend(field_value)
+
+        return self.execute_command('XADD', *pieces)
+
+    def xread(self, *streams, block=None, count=None, default_id='$'):
+        """
+        streams is a sequence of stream identifiers, which can each either be
+        just the name or a tuple of name and id. default_id is the id to
+        use for streams which are not specified in the latter form.
+        """
+        pieces = []
+        ids = []
+
+        if block is not None:
+            pieces.extend([Token('BLOCK'), block])
+
+        if count is not None:
+            pieces.extend([Token('COUNT'), count])
+
+        if not streams:
+            raise RedisError("At least one stream must be specified")
+
+        pieces.append(Token('STREAMS'))
+
+        for i, stream in enumerate(streams, 1):
+            if isinstance(stream, basestring):
+                pieces.append(stream)
+                ids.append(default_id)
+            elif isinstance(stream, Sequence) and len(stream) == 2:
+                pieces.append(stream[0])
+                ids.append(stream[1])
+            else:
+                raise RedisError("Stream identifier #%d invalid" % i)
+        pieces.extend(ids)
+
+        return self.execute_command('XREAD', *pieces)
 
 
 class Redis(StrictRedis):

@@ -87,6 +87,7 @@ if sys.version_info[0] < 3:
     from itertools import imap, izip
     from string import letters as ascii_letters
     from Queue import Queue
+    from collections import Sequence, Mapping
     try:
         from cStringIO import StringIO as BytesIO
     except ImportError:
@@ -137,6 +138,7 @@ else:
     from io import BytesIO
     from string import ascii_letters
     from queue import Queue
+    from collections.abc import Sequence, Mapping
 
     def iteritems(x):
         return iter(x.items())
